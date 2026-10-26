@@ -1,72 +1,97 @@
-"""
-cliente.py - Cliente interactivo de consola para la API de Gestión de Tareas.
-Usa requests.Session para conservar la cookie de sesión tras el login.
-"""
-import getpass
-import re
+import socket
+import json
+import sys
 
-import requests
+HOST = '127.0.0.1'
+PORT = 65432
+BUFFER_SIZE = 4096
 
-URL_BASE = "http://127.0.0.1:5000"
-sesion = requests.Session()
+def enviar_peticion(client_socket, accion, datos=None):
+    if datos is None:
+        datos = {}
+    payload = {"accion": accion, "datos": datos}
+    client_socket.sendall(json.dumps(payload).encode('utf-8'))
+    
+    respuesta_bytes = client_socket.recv(BUFFER_SIZE)
+    return json.loads(respuesta_bytes.decode('utf-8'))
 
-
-def pedir_credenciales():
-    usuario = input("Usuario: ").strip()
-    password = getpass.getpass("Contraseña (no se muestra al escribir): ").strip()
-    return {"usuario": usuario, "contraseña": password}
-
-
-def mostrar_respuesta(resp):
-    """Imprime el estado y el mensaje (JSON) devuelto por el servidor."""
+def main():
     try:
-        cuerpo = resp.json()
-        texto = cuerpo.get("mensaje") or cuerpo.get("error")
-    except ValueError:
-        texto = None  # la respuesta no es JSON (por ejemplo, un error 500 en HTML)
-    if texto is None:
-        texto = "Error interno del servidor." if resp.status_code >= 500 else "Respuesta sin mensaje."
-    print(f"[{resp.status_code}] {texto}")
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect((HOST, PORT))
+        print("Conectado al servidor distribuido exitosamente.")
+    except ConnectionRefusedError:
+        print("Error: No se pudo conectar. ¿Está el servidor encendido?")
+        sys.exit()
 
+    usuario_id_actual = None
 
-def registrarse():
-    resp = sesion.post(f"{URL_BASE}/registro", json=pedir_credenciales(), timeout=5)
-    mostrar_respuesta(resp)
+    try:
+        while True:
+            print("\n--- Sistema de Gestión de Tareas (Socket TCP) ---")
+            
+            # MENÚ CUANDO NO HAY SESIÓN INICIADA
+            if not usuario_id_actual:
+                print("1. Registrarse")
+                print("2. Iniciar Sesión")
+                print("3. Salir")
+                opcion = input("Elige una opción: ")
 
+                if opcion == '1':
+                    usr = input("Nuevo usuario: ")
+                    pwd = input("Nueva contraseña: ")
+                    res = enviar_peticion(client_socket, 'registro', {"usuario": usr, "password": pwd})
+                    print(f"Respuesta: {res['mensaje']}")
 
-def iniciar_sesion():
-    resp = sesion.post(f"{URL_BASE}/login", json=pedir_credenciales(), timeout=5)
-    mostrar_respuesta(resp)
+                elif opcion == '2':
+                    usr = input("Usuario: ")
+                    pwd = input("Contraseña: ")
+                    res = enviar_peticion(client_socket, 'login', {"usuario": usr, "password": pwd})
+                    print(f"Respuesta: {res['mensaje']}")
+                    if res['status'] == 'success':
+                        usuario_id_actual = res['usuario_id']
 
+                elif opcion == '3':
+                    print("Desconectando...")
+                    break
+                else:
+                    print("Opción inválida.")
+            
+            # MENÚ CUANDO SÍ HAY SESIÓN INICIADA
+            else:
+                print("1. Crear Tarea")
+                print("2. Ver Mis Tareas")
+                print("3. Cerrar Sesión")
+                print("4. Salir")
+                opcion = input("Elige una opción: ")
 
-def ver_tareas():
-    resp = sesion.get(f"{URL_BASE}/tareas", timeout=5)
-    if resp.status_code == 200:
-        # Extrae el título <h1> del HTML para mostrarlo en consola
-        titulo = re.search(r"<h1>(.*?)</h1>", resp.text, re.S)
-        print(f"[200] Respuesta HTML recibida: {titulo.group(1) if titulo else ''}")
-    else:
-        mostrar_respuesta(resp)
+                if opcion == '1':
+                    desc = input("Descripción de la tarea: ")
+                    res = enviar_peticion(client_socket, 'crear_tarea', {"usuario_id": usuario_id_actual, "descripcion": desc})
+                    print(f"Respuesta: {res['mensaje']}")
 
+                elif opcion == '2':
+                    res = enviar_peticion(client_socket, 'ver_tareas', {"usuario_id": usuario_id_actual})
+                    if res['status'] == 'success':
+                        print("\nTus tareas:")
+                        if not res['tareas']:
+                            print("- No tenés tareas pendientes.")
+                        for t in res['tareas']:
+                            print(f"- [{t['estado'].upper()}] {t['descripcion']} (ID: {t['id']})")
+                    else:
+                        print("Error al obtener tareas.")
 
-def menu():
-    opciones = {"1": registrarse, "2": iniciar_sesion, "3": ver_tareas}
-    while True:
-        print("\n=== Gestión de Tareas ===")
-        print("1. Registrarse\n2. Iniciar sesión\n3. Ver tareas\n4. Salir")
-        eleccion = input("Elija una opción: ").strip()
-        if eleccion == "4":
-            print("¡Hasta luego!")
-            break
-        accion = opciones.get(eleccion)
-        if not accion:
-            print("Opción inválida.")
-            continue
-        try:
-            accion()
-        except requests.exceptions.RequestException:
-            print("No se pudo conectar con el servidor. ¿Está en ejecución?")
+                elif opcion == '3':
+                    usuario_id_actual = None
+                    print("Sesión cerrada correctamente.")
 
+                elif opcion == '4':
+                    print("Desconectando...")
+                    break
+                else:
+                    print("Opción inválida.")
+    finally:
+        client_socket.close()
 
 if __name__ == "__main__":
-    menu()
+    main()

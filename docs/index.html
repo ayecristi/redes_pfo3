@@ -1,97 +1,93 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PFO 2 – Sistema de Gestión de Tareas</title>
-<style>
-  :root { --bg:#f6f7f9; --ink:#1c2630; --muted:#5a6672; --line:#d9dee4; --accent:#0a6c8c; --code:#e9edf1; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#14191f; --ink:#e6eaee; --muted:#9aa6b2; --line:#2b343d; --accent:#5ec0e0; --code:#1e262e; }
-  }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--ink); line-height:1.65;
-         font-family: "Segoe UI", system-ui, -apple-system, sans-serif; }
-  main { max-width: 760px; margin: 0 auto; padding: 3rem 1.25rem 4rem; }
-  h1 { font-size: clamp(2rem, 6vw, 2.9rem); line-height:1.1; margin:0 0 .6rem; letter-spacing:-.02em; }
-  h2 { font-size:1.35rem; margin:2.8rem 0 .8rem; padding-top:1rem; border-top:1px solid var(--line); }
-  h3 { font-size:1.05rem; margin:1.4rem 0 .4rem; }
-  p, li { max-width: 68ch; }
-  .lead { color:var(--muted); font-size:1.1rem; margin:0 0 1.2rem; }
-  a { color:var(--accent); }
-  code { font-family: Consolas, "Courier New", monospace; background:var(--code); padding:.1em .35em; border-radius:3px; font-size:.92em; }
-  pre { background:var(--code); padding:1rem; border-radius:6px; overflow-x:auto; }
-  pre code { background:none; padding:0; }
-  .table-wrap { overflow-x:auto; }
-  table { border-collapse:collapse; width:100%; font-size:.95rem; }
-  th, td { text-align:left; padding:.55rem .7rem; border-bottom:1px solid var(--line); vertical-align:top; }
-  th { font-weight:600; }
-  figure { margin:1.4rem 0; }
-  figure img { max-width:100%; border:1px solid var(--line); border-radius:6px; }
-  figcaption { color:var(--muted); font-size:.9rem; margin-top:.4rem; }
-  .btn { display:inline-block; padding:.55rem 1rem; border:1px solid var(--accent); border-radius:6px;
-         text-decoration:none; font-weight:600; }
-  .btn:focus-visible, a:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PFO 3 - Diagrama de Arquitectura Distribuida</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            background-color: #f9f9f9;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            max-width: 900px;
+            margin: auto;
+            text-align: center;
+        }
+        h2 {
+            color: #333;
+        }
+    </style>
 </head>
 <body>
-<main>
-  <h1>Sistema de Gestión de Tareas con API y Base de Datos</h1>
-  <p class="lead">PFO 2: API REST en Flask con SQLite, contraseñas hasheadas y un cliente interactivo de consola.</p>
-  <a class="btn" href="https://github.com/ayecristi/redes_pfo2">Ver el código en GitHub</a>
 
-  <h2>Qué hace el proyecto</h2>
-  <p>Un servidor Flask permite registrar usuarios, iniciar sesión y consultar una página de bienvenida protegida. Los datos se guardan en un archivo SQLite local y las contraseñas nunca se almacenan en texto plano. Un cliente de consola, hecho con <code>requests</code>, consume la API de forma interactiva.</p>
-  <p>Esta página es solo una presentación del trabajo: GitHub Pages no ejecuta Python, por lo que la API corre localmente (ver más abajo).</p>
+    <div class="container">
+        <h2>PFO 3: Arquitectura Cliente-Servidor Distribuida</h2>
+        <!-- Aquí se renderiza el gráfico de Mermaid -->
+        <div class="mermaid">
+            graph TD
+                %% Clientes
+                C1[Mobile Client] -->|TCP Socket| LB
+                C2[Web Client] -->|TCP Socket / WSS| LB
+                C3[CLI Client] -->|TCP Socket| LB
 
-  <h2>Tecnologías</h2>
-  <ul>
-    <li><strong>Python</strong> y <strong>Flask</strong> para el servidor.</li>
-    <li><strong>SQLite</strong> (<code>database.db</code>) como base de datos.</li>
-    <li><strong>werkzeug.security</strong> para hashear contraseñas.</li>
-    <li><strong>requests</strong> para el cliente de consola.</li>
-  </ul>
+                %% Balanceador
+                subgraph "Edge / Entry Point"
+                    LB(Load Balancer<br/>Nginx / HAProxy)
+                end
 
-  <h2>Endpoints</h2>
-  <div class="table-wrap">
-  <table>
-    <thead><tr><th>Método y ruta</th><th>Qué hace</th><th>Respuestas</th></tr></thead>
-    <tbody>
-      <tr><td><code>POST /registro</code></td><td>Recibe <code>{"usuario", "contraseña"}</code>, hashea la contraseña y crea el usuario.</td><td>201 creado, 409 usuario existente, 400 datos faltantes</td></tr>
-      <tr><td><code>POST /login</code></td><td>Verifica las credenciales contra el hash guardado e inicia la sesión.</td><td>200 correcto, 401 credenciales inválidas, 400 datos faltantes</td></tr>
-      <tr><td><code>GET /tareas</code></td><td>Muestra la plantilla HTML de bienvenida (requiere sesión iniciada).</td><td>200 HTML, 401 sin sesión</td></tr>
-    </tbody>
-  </table>
-  </div>
+                %% Servidores Socket
+                subgraph "Capa de Presentación (Socket Servers)"
+                    S1[Socket Server 1<br/>Thread Pool]
+                    S2[Socket Server 2<br/>Thread Pool]
+                end
 
-  <h2>Cómo ejecutarlo</h2>
-  <pre><code>git clone https://github.com/ayecristi/redes_pfo2.git
-cd redes_pfo2
-pip install -r requirements.txt
-python servidor.py</code></pre>
-  <p>En otra terminal, dentro de la misma carpeta:</p>
-  <pre><code>python cliente.py</code></pre>
-  <p>El README del repositorio detalla cada paso y la guía de pruebas con <code>curl</code>.</p>
+                LB -->|Distribución Round Robin| S1
+                LB -->|Distribución Round Robin| S2
 
-  <h2>Capturas de las pruebas</h2>
-  <figure><img src="capturas/01_registro.png" alt="Registro de un usuario desde el cliente de consola"><figcaption>Registro de usuario</figcaption></figure>
-  <figure><img src="capturas/02_login.png" alt="Inicio de sesión exitoso en el cliente de consola"><figcaption>Inicio de sesión</figcaption></figure>
-  <figure><img src="capturas/03_tareas.png" alt="Consulta al endpoint /tareas con la bienvenida"><figcaption>Consulta a <code>/tareas</code></figcaption></figure>
-  <figure><img src="capturas/04_hash_en_bd.png" alt="Tabla usuarios en SQLite mostrando la contraseña hasheada"><figcaption>Contraseña almacenada como hash en SQLite</figcaption></figure>
+                %% Cola de Mensajes
+                subgraph "Capa de Integración"
+                    MQ((RabbitMQ<br/>Message Queue))
+                end
 
-  <h2>Respuestas teóricas</h2>
-  <h3>¿Por qué hashear contraseñas?</h3>
-  <p>Guardar contraseñas en texto plano implica que, ante una filtración de la base de datos, todas las cuentas quedan comprometidas al instante. Un hash es una función de un solo sentido: a partir de la contraseña se obtiene una cadena irreversible, y al iniciar sesión se compara el hash de lo ingresado con el almacenado. Además, <code>werkzeug.security</code> agrega un salt aleatorio, de modo que dos usuarios con la misma contraseña tienen hashes distintos y se dificultan los ataques con tablas precalculadas. Como muchas personas reutilizan contraseñas, protegerlas también evita daños en otros servicios.</p>
+                S1 -->|Publica tareas asíncronas| MQ
+                S2 -->|Publica tareas asíncronas| MQ
 
-  <h3>Ventajas de usar SQLite en este proyecto</h3>
-  <ul>
-    <li><strong>Sin servidor:</strong> la base es un único archivo local, sin instalar ni configurar un motor aparte.</li>
-    <li><strong>Incluida en Python:</strong> el módulo <code>sqlite3</code> viene en la biblioteca estándar.</li>
-    <li><strong>Portable:</strong> el proyecto se copia y funciona, ideal para desarrollo y entrega.</li>
-    <li><strong>Suficiente para el volumen esperado:</strong> soporta SQL estándar, transacciones y restricciones como <code>UNIQUE</code>.</li>
-    <li><strong>Fácil de inspeccionar y respaldar:</strong> copiar el archivo es un backup.</li>
-  </ul>
-  <p>Para mucha concurrencia de escritura convendría migrar a PostgreSQL o MySQL.</p>
-</main>
+                %% Workers
+                subgraph "Capa de Procesamiento (Workers)"
+                    W1[Worker Service A]
+                    W2[Worker Service B]
+                end
+
+                MQ -->|Consume tareas| W1
+                MQ -->|Consume tareas| W2
+
+                %% Almacenamiento
+                subgraph "Capa de Datos Distribuida"
+                    DB[(PostgreSQL<br/>Usuarios, Tareas)]
+                    S3[(Amazon S3 / MinIO<br/>Archivos)]
+                end
+
+                W1 -->|Lee/Escribe| DB
+                W1 -->|Sube/Descarga| S3
+                W2 -->|Lee/Escribe| DB
+                W2 -->|Sube/Descarga| S3
+                
+                %% Lecturas síncronas
+                S1 -.->|Lectura para Login| DB
+                S2 -.->|Lectura para Login| DB
+        </div>
+    </div>
+
+    <!-- Script de Mermaid para transformar el texto en gráfico -->
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ startOnLoad: true, theme: 'default' });
+    </script>
 </body>
 </html>

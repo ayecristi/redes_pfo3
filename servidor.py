@@ -1,127 +1,167 @@
-"""
-servidor.py - API REST para el Sistema de Gestión de Tareas (PFO 2).
-
-Endpoints:
-    POST /registro  -> crea un usuario (contraseña hasheada)
-    POST /login     -> valida credenciales e inicia sesión
-    GET  /tareas    -> página HTML de bienvenida (requiere sesión iniciada)
-"""
-import os
+import socket
+import json
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from werkzeug.security import generate_password_hash, check_password_hash
 
-from flask import Flask, jsonify, render_template, request, session
-from werkzeug.security import check_password_hash, generate_password_hash
+# NOTA ARQUITECTURA: Para facilitar la ejecución local de este prototipo, 
+# se utiliza SQLite. En el entorno productivo (según diagrama), 
+# esta conexión se realiza mediante psycopg2 hacia PostgreSQL.
 
-# ---------------------------------------------------------------------------
-# Configuración
-# ---------------------------------------------------------------------------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATABASE = os.path.join(BASE_DIR, "database.db")
+# Configuración del servidor Socket
+HOST = '127.0.0.1'
+PORT = 65432
+BUFFER_SIZE = 4096
+MAX_WORKERS = 10  # Pool de hilos para manejar clientes/tareas concurrentes
 
-app = Flask(__name__)
-# Clave para firmar la cookie de sesión. En producción, definir SECRET_KEY como variable de entorno.
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "clave-de-desarrollo-cambiar")
-
-
-# ---------------------------------------------------------------------------
-# Base de datos
-# ---------------------------------------------------------------------------
-def get_db():
-    """Abre una conexión a SQLite con acceso a columnas por nombre."""
-    conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row
-    return conn
-
+DB_FILE = 'database.db'
+db_lock = threading.Lock() # Necesario en SQLite para evitar colisiones entre hilos
 
 def init_db():
-    """Crea la tabla de usuarios si no existe."""
-    with get_db() as conn:
-        conn.execute(
-            """
+    """Inicializa la base de datos (En la arquitectura real, esto es PostgreSQL)"""
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
             CREATE TABLE IF NOT EXISTS usuarios (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                usuario TEXT NOT NULL UNIQUE,
+                usuario TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL
             )
-            """
-        )
-
-
-@app.cli.command("init-db")
-def init_db_command():
-    """Comando: flask --app servidor init-db"""
-    init_db()
-    print(f"Base de datos inicializada en {DATABASE}")
-
-
-# ---------------------------------------------------------------------------
-# Utilidades
-# ---------------------------------------------------------------------------
-def obtener_credenciales():
-    """Extrae y valida usuario/contraseña del JSON. Devuelve (usuario, contraseña) o (None, None)."""
-    data = request.get_json(silent=True) or {}
-    usuario = str(data.get("usuario", "")).strip()
-    password = str(data.get("contraseña", ""))
-    if not usuario or not password:
-        return None, None
-    return usuario, password
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
-@app.route("/registro", methods=["POST"])
-def registro():
-    usuario, password = obtener_credenciales()
-    if not usuario:
-        return jsonify({"error": "Se requieren 'usuario' y 'contraseña'."}), 400
-
-    # Hash con salt aleatorio (nunca se guarda la contraseña en texto plano)
-    password_hash = generate_password_hash(password)
-
-    try:
-        with get_db() as conn:
-            conn.execute(
-                "INSERT INTO usuarios (usuario, password_hash) VALUES (?, ?)",
-                (usuario, password_hash),
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS tareas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                usuario_id INTEGER NOT NULL,
+                descripcion TEXT NOT NULL,
+                estado TEXT DEFAULT 'pendiente',
+                FOREIGN KEY (usuario_id) REFERENCES usuarios (id)
             )
+        ''')
+        conn.commit()
+
+def procesar_peticion(payload):
+    """
+    Simula el enrutamiento del servidor.
+    En una arquitectura completa, las tareas de escritura pesadas se enviarían a RabbitMQ acá.
+    """
+    accion = payload.get('accion')
+    datos = payload.get('datos', {})
+
+    if accion == 'registro':
+        return manejar_registro(datos)
+    elif accion == 'login':
+        return manejar_login(datos)
+    elif accion == 'crear_tarea':
+        return manejar_crear_tarea(datos)
+    elif accion == 'ver_tareas':
+        return manejar_ver_tareas(datos)
+    else:
+        return {"status": "error", "mensaje": "Acción no reconocida"}
+
+def manejar_registro(datos):
+    usuario = datos.get('usuario')
+    password = datos.get('password')
+    if not usuario or not password:
+        return {"status": "error", "mensaje": "Faltan credenciales"}
+    
+    hashed_pw = generate_password_hash(password)
+    try:
+        with db_lock, sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute('INSERT INTO usuarios (usuario, password_hash) VALUES (?, ?)', (usuario, hashed_pw))
+            conn.commit()
+        return {"status": "success", "mensaje": "Usuario registrado exitosamente"}
     except sqlite3.IntegrityError:
-        # La columna 'usuario' es UNIQUE: el usuario ya existe
-        return jsonify({"error": "El usuario ya existe."}), 409
+        return {"status": "error", "mensaje": "El usuario ya existe"}
 
-    return jsonify({"mensaje": f"Usuario '{usuario}' registrado correctamente."}), 201
+def manejar_login(datos):
+    usuario = datos.get('usuario')
+    password = datos.get('password')
+    with db_lock, sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, password_hash FROM usuarios WHERE usuario = ?', (usuario,))
+        row = cursor.fetchone()
+        
+    if row and check_password_hash(row[1], password):
+        return {"status": "success", "mensaje": "Login exitoso", "usuario_id": row[0]}
+    return {"status": "error", "mensaje": "Credenciales inválidas"}
 
+def manejar_crear_tarea(datos):
+    # NOTA ARQUITECTURA: Esto idealmente publicaría un mensaje en RabbitMQ
+    usuario_id = datos.get('usuario_id')
+    descripcion = datos.get('descripcion')
+    with db_lock, sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('INSERT INTO tareas (usuario_id, descripcion) VALUES (?, ?)', (usuario_id, descripcion))
+        conn.commit()
+    return {"status": "success", "mensaje": "Tarea encolada/creada exitosamente"}
 
-@app.route("/login", methods=["POST"])
-def login():
-    usuario, password = obtener_credenciales()
-    if not usuario:
-        return jsonify({"error": "Se requieren 'usuario' y 'contraseña'."}), 400
+def manejar_ver_tareas(datos):
+    usuario_id = datos.get('usuario_id')
+    with db_lock, sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, descripcion, estado FROM tareas WHERE usuario_id = ?', (usuario_id,))
+        tareas = [{"id": row[0], "descripcion": row[1], "estado": row[2]} for row in cursor.fetchall()]
+    return {"status": "success", "tareas": tareas}
 
-    with get_db() as conn:
-        fila = conn.execute(
-            "SELECT password_hash FROM usuarios WHERE usuario = ?", (usuario,)
-        ).fetchone()
+def handle_client(conn, addr):
+    """Función ejecutada por el ThreadPool para cada cliente conectado"""
+    print(f"[NUEVA CONEXIÓN] Cliente conectado desde {addr}")
+    try:
+        while True:
+            data = conn.recv(BUFFER_SIZE)
+            if not data:
+                break
+            
+            # Decodificar el mensaje del cliente
+            mensaje_str = data.decode('utf-8')
+            payload = json.loads(mensaje_str)
+            print(f"[RECV] de {addr}: {payload.get('accion')}")
+            
+            # Procesar y responder
+            respuesta = procesar_peticion(payload)
+            conn.sendall(json.dumps(respuesta).encode('utf-8'))
+            
+    except ConnectionResetError:
+        print(f"[DESCONEXIÓN ABRUPTA] {addr}")
+    except json.JSONDecodeError:
+        error_msg = json.dumps({"status": "error", "mensaje": "Formato JSON inválido"})
+        conn.sendall(error_msg.encode('utf-8'))
+    finally:
+        conn.close()
+        print(f"[DESCONECTADO] {addr}")
 
-    # Mismo mensaje si falla el usuario o la clave (no revela qué usuarios existen)
-    if fila is None or not check_password_hash(fila["password_hash"], password):
-        return jsonify({"error": "Credenciales inválidas."}), 401
+def iniciar_servidor():
+    init_db()
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    
+    # El secreto: hacer que el socket respire cada 1 segundo
+    server.settimeout(1.0) 
+    
+    server.bind((HOST, PORT))
+    server.listen()
+    
+    print(f"[INICIANDO] Servidor TCP escuchando en {HOST}:{PORT}")
+    print(f"[ARQUITECTURA] Usando ThreadPoolExecutor con {MAX_WORKERS} workers")
+    
+    # Evitamos que el pool trabe la salida con shutdown
+    executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
+    try:
+        while True:
+            try:
+                conn, addr = server.accept()
+                executor.submit(handle_client, conn, addr)
+            except socket.timeout:
+                # No se conectó nadie en este segundo, volvemos a intentar
+                pass
+    except KeyboardInterrupt:
+        print("\n[APAGANDO] Capturado Ctrl+C. Cerrando el servidor...")
+    finally:
+        executor.shutdown(wait=False)
+        server.close()
+        print("[APAGADO] Servidor cerrado correctamente.")
 
-    session["usuario"] = usuario
-    return jsonify({"mensaje": f"Bienvenido, {usuario}. Login exitoso."}), 200
-
-
-@app.route("/tareas", methods=["GET"])
-def tareas():
-    usuario = session.get("usuario")
-    if not usuario:
-        return jsonify({"error": "Acceso denegado. Inicie sesión primero."}), 401
-    return render_template("index.html", usuario=usuario)
-
-
-# ---------------------------------------------------------------------------
-# Arranque
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    init_db()  # garantiza que la BD exista al iniciar
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    iniciar_servidor()
