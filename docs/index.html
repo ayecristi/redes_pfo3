@@ -28,6 +28,10 @@
 
     <div class="container">
         <h2>PFO 3: Arquitectura Cliente-Servidor Distribuida</h2>
+        <p style="color:#666; font-size:14px;">
+    Arquitectura objetivo. El prototipo implementa los servidores socket con Thread Pool y el cliente;
+    RabbitMQ, los Workers, PostgreSQL y S3 son conceptuales.
+        </p>
         <!-- Aquí se renderiza el gráfico de Mermaid -->
         <div class="mermaid">
             graph TD
@@ -78,9 +82,9 @@
                 W2 -->|Lee/Escribe| DB
                 W2 -->|Sube/Descarga| S3
                 
-                %% Lecturas síncronas
-                S1 -.->|Lectura para Login| DB
-                S2 -.->|Lectura para Login| DB
+                %% Login y sesiones (acceso directo del servidor)
+                S1 -.->|Login y sesiones| DB
+                S2 -.->|Login y sesiones| DB
         </div>
     </div>
 
